@@ -51,7 +51,7 @@ interface CustomerDetailModalProps {
   customer: Customer;
   onClose: () => void;
 }
-
+//Costomer
 export default function CustomerDetailModal({
   customer,
   onClose,
@@ -79,9 +79,7 @@ export default function CustomerDetailModal({
         const result = await response.json();
 
         if (!response.ok) {
-          console.error(
-            result.message || "Gagal mengambil riwayat transaksi",
-          );
+          console.error(result.message || "Gagal mengambil riwayat transaksi");
           return;
         }
 
@@ -410,4 +408,3 @@ export default function CustomerDetailModal({
     </div>
   );
 }
-
