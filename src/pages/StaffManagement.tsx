@@ -55,7 +55,7 @@ export default function StaffManagement() {
     try {
       const token = localStorage.getItem("token");
 
-      const res = await fetch("http://localhost:5000/api/auth/staff", {
+      const res = await fetch("http://localhost:3000/api/auth/staff", {
         headers: {
           Authorization: `Bearer ${token}`,
         },

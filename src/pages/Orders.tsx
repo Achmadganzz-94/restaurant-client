@@ -95,7 +95,7 @@ export default function Orders() {
       try {
         const token = localStorage.getItem("token");
 
-        const response = await fetch("http://localhost:5000/api/orders", {
+        const response = await fetch("http://localhost:3000/api/orders", {
           headers: {
             Authorization: `Bearer ${token}`,
           },

@@ -154,7 +154,7 @@ export default function Reports() {
         const { startDate, endDate } = getDateRange(period);
 
         const url =
-          `http://localhost:5000/api/reports` +
+          `http://localhost:3000/api/reports` +
           `?startDate=${startDate}` +
           `&endDate=${endDate}`;
 

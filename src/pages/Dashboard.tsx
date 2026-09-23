@@ -42,7 +42,7 @@ export default function Dashboard() {
       try {
         const token = localStorage.getItem("token");
 
-        const response = await fetch("http://localhost:5000/api/orders", {
+        const response = await fetch("http://localhost:3000/api/orders", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -58,7 +58,7 @@ export default function Dashboard() {
 
     const fetchMenus = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/menu");
+        const response = await fetch("http://localhost:3000/api/menu");
 
         const result = await response.json();
 
@@ -70,7 +70,7 @@ export default function Dashboard() {
 
     const fetchPopularMenus = async () => {
       try {
-        const response = await fetch("http://localhost:5000/api/menu/popular");
+        const response = await fetch("http://localhost:3000/api/menu/popular");
 
         const result = await response.json();
 

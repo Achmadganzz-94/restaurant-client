@@ -45,7 +45,7 @@ export default function MenuManagement() {
     try {
       const token = localStorage.getItem("token");
 
-      const res = await fetch("http://localhost:5000/api/menu", {
+      const res = await fetch("http://localhost:3000/api/menu", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -137,8 +137,8 @@ export default function MenuManagement() {
       const token = localStorage.getItem("token");
 
       const url = editingMenu
-        ? `http://localhost:5000/api/menu/${editingMenu.id}`
-        : "http://localhost:5000/api/menu";
+        ? `http://localhost:3000/api/menu/${editingMenu.id}`
+        : "http://localhost:3000/api/menu";
 
       const method = editingMenu ? "PUT" : "POST";
 
@@ -178,7 +178,7 @@ export default function MenuManagement() {
     try {
       const token = localStorage.getItem("token");
 
-      const res = await fetch(`http://localhost:5000/api/menu/${id}`, {
+      const res = await fetch(`http://localhost:3000/api/menu/${id}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
