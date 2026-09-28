@@ -126,7 +126,7 @@ export default function Orders() {
       try {
         const token = localStorage.getItem("token");
 
-        const response = await fetch("http://localhost:5000/api/menu", {
+        const response = await fetch("http://localhost:3000/api/menu", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -155,7 +155,7 @@ export default function Orders() {
       try {
         const token = localStorage.getItem("token");
 
-        const response = await fetch("http://localhost:5000/api/customers", {
+        const response = await fetch("http://localhost:3000/api/customers", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -199,7 +199,7 @@ export default function Orders() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `http://localhost:5000/api/orders/${orderId}/history`,
+        `http://localhost:3000/api/orders/${orderId}/history`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -255,7 +255,7 @@ export default function Orders() {
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        `http://localhost:5000/api/orders/${selectedOrder.id}/status`,
+        `http://localhost:3000/api/orders/${selectedOrder.id}/status`,
         {
           method: "PATCH",
           headers: {
@@ -337,7 +337,7 @@ export default function Orders() {
 
       const token = localStorage.getItem("token");
 
-      const response = await fetch("http://localhost:5000/api/payments", {
+      const response = await fetch("http://localhost:3000/api/payments", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -497,7 +497,7 @@ export default function Orders() {
         })),
       };
 
-      const response = await fetch("http://localhost:5000/api/orders", {
+      const response = await fetch("http://localhost:3000/api/orders", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
