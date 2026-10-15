@@ -1,35 +1,136 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent, FormEvent, ReactNode } from "react";
+
+import { io } from "socket.io-client";
+
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
+
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "../components/ui/dialog";
+
+import {
+  FiPlus,
+  FiSearch,
+  FiTrash2,
+  FiCheckCircle,
+  FiXCircle,
+  FiRefreshCw,
+  FiGrid,
+  FiCoffee,
+  FiPackage,
+  FiShoppingBag,
+  FiAlertTriangle,
+  FiInfo,
+  FiX,
+} from "react-icons/fi";
 
 interface MenuItem {
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   price: number;
   category: string;
-  imageUrl?: string;
+  imageUrl?: string | null;
   isAvailable: boolean;
+  stockQty?: number;
 }
+
+type CategoryValue =
+  | "SEMUA"
+  | "MAKANAN"
+  | "MINUMAN"
+  | "SNACK"
+  | "DESSERT"
+  | "PAKET";
+
+type StatusValue = "SEMUA" | "TERSEDIA" | "HABIS";
+
+type ToastType = "success" | "error" | "warning" | "info";
+
+interface ToastState {
+  show: boolean;
+  type: ToastType;
+  message: string;
+}
+
+interface MenuApiResponse {
+  success?: boolean;
+  data?: MenuItem[];
+  pagination?: {
+    page?: number;
+    limit?: number;
+    total?: number;
+    totalPages?: number;
+  };
+  message?: string;
+}
+
+const API_URL = "http://localhost:3000";
+
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || API_URL;
+
+const formatRupiah = (value: number) =>
+  `Rp ${Number(value || 0).toLocaleString("id-ID")}`;
+
+const categoryConfig: Record<
+  Exclude<CategoryValue, "SEMUA">,
+  {
+    label: string;
+    icon: ReactNode;
+  }
+> = {
+  MAKANAN: {
+    label: "Makanan",
+    icon: <FiShoppingBag size={14} />,
+  },
+  MINUMAN: {
+    label: "Minuman",
+    icon: <FiCoffee size={14} />,
+  },
+  SNACK: {
+    label: "Snack",
+    icon: <FiGrid size={14} />,
+  },
+  DESSERT: {
+    label: "Dessert",
+    icon: <FiCoffee size={14} />,
+  },
+  PAKET: {
+    label: "Paket",
+    icon: <FiPackage size={14} />,
+  },
+};
 
 export default function MenuManagement() {
   const [menuList, setMenuList] = useState<MenuItem[]>([]);
+
   const [isOpen, setIsOpen] = useState(false);
   const [editingMenu, setEditingMenu] = useState<MenuItem | null>(null);
+
   const [loading, setLoading] = useState(false);
+  const [loadingStatusId, setLoadingStatusId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const [error, setError] = useState("");
 
-  // FILTER
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [menuToDelete, setMenuToDelete] = useState<MenuItem | null>(null);
+
+  const [toast, setToast] = useState<ToastState>({
+    show: false,
+    type: "success",
+    message: "",
+  });
+
   const [search, setSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("SEMUA");
-  const [selectedStatus, setSelectedStatus] = useState("SEMUA");
+  const [selectedCategory, setSelectedCategory] =
+    useState<CategoryValue>("SEMUA");
+  const [selectedStatus, setSelectedStatus] = useState<StatusValue>("SEMUA");
 
   const [formData, setFormData] = useState({
     name: "",
@@ -37,59 +138,159 @@ export default function MenuManagement() {
     price: "",
     category: "MAKANAN",
     imageUrl: "",
-    isAvailable: true,
   });
 
-  // FETCH MENU
+  // ==========================================
+  // TOAST
+  // ==========================================
+
+  const showToast = (message: string, type: ToastType = "success") => {
+    setToast({
+      show: true,
+      type,
+      message,
+    });
+  };
+
+  const hideToast = () => {
+    setToast((previous) => ({
+      ...previous,
+      show: false,
+    }));
+  };
+
+  useEffect(() => {
+    if (!toast.show) return;
+
+    const timer = window.setTimeout(() => {
+      hideToast();
+    }, 3000);
+
+    return () => window.clearTimeout(timer);
+  }, [toast.show]);
+
+  // ==========================================
+  // AMBIL SEMUA MENU DARI BACKEND
+  //
+  // Mendukung pagination backend.
+  // Jadi admin tidak berhenti di lima menu pertama.
+  // ==========================================
+
   const fetchMenu = async () => {
     try {
       const token = localStorage.getItem("token");
 
-      const res = await fetch("http://localhost:3000/api/menu", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const fetchPage = async (page: number): Promise<MenuApiResponse> => {
+        const response = await fetch(
+          `${API_URL}/api/menu?page=${page}&limit=50`,
+          {
+            headers: {
+              Authorization: `Bearer ${token ?? ""}`,
+            },
+          },
+        );
 
-      if (res.ok) {
-        const result = await res.json();
-        setMenuList(result.data || result);
-      }
-    } catch (err) {
-      console.error("Gagal mengambil data menu", err);
-    }
-  };
+        if (!response.ok) {
+          throw new Error("Gagal mengambil data menu");
+        }
 
-  useEffect(() => {
-    fetchMenu();
-  }, []);
-
-  // IMAGE
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        setError("Ukuran foto terlalu besar! Maksimal 2MB.");
-        return;
-      }
-
-      setError("");
-
-      const reader = new FileReader();
-
-      reader.onloadend = () => {
-        setFormData((prev) => ({
-          ...prev,
-          imageUrl: reader.result as string,
-        }));
+        return (await response.json()) as MenuApiResponse;
       };
 
-      reader.readAsDataURL(file);
+      const firstResult = await fetchPage(1);
+
+      const firstPageData = Array.isArray(firstResult.data)
+        ? firstResult.data
+        : [];
+
+      const totalPages = Math.max(
+        1,
+        Math.ceil(Number(firstResult.pagination?.totalPages) || 1),
+      );
+
+      const remainingResults =
+        totalPages > 1
+          ? await Promise.all(
+              Array.from({ length: totalPages - 1 }, (_, index) =>
+                fetchPage(index + 2),
+              ),
+            )
+          : [];
+
+      const allMenus = [
+        ...firstPageData,
+        ...remainingResults.flatMap((result) =>
+          Array.isArray(result.data) ? result.data : [],
+        ),
+      ];
+
+      setMenuList(allMenus);
+      setError("");
+    } catch (err) {
+      console.error("Gagal mengambil data menu:", err);
+
+      showToast("Gagal mengambil data menu", "error");
     }
   };
 
-  // CREATE
+  // ==========================================
+  // SOCKET.IO: SINKRONISASI REALTIME
+  //
+  // Backend mengirim event menu:changed setelah
+  // menu berhasil dibuat, diedit, atau dihapus.
+  // ==========================================
+
+  useEffect(() => {
+    void fetchMenu();
+
+    const socket = io(SOCKET_URL);
+
+    const handleMenuChanged = () => {
+      void fetchMenu();
+    };
+
+    socket.on("menu:changed", handleMenuChanged);
+
+    return () => {
+      socket.off("menu:changed", handleMenuChanged);
+      socket.disconnect();
+    };
+  }, []);
+
+  // ==========================================
+  // FOTO MENU
+  // ==========================================
+
+  const handleImageChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      setError("Ukuran foto terlalu besar! Maksimal 2MB.");
+      showToast("Ukuran foto maksimal 2MB", "error");
+      event.target.value = "";
+      return;
+    }
+
+    setError("");
+
+    const reader = new FileReader();
+
+    reader.onloadend = () => {
+      setFormData((previous) => ({
+        ...previous,
+        imageUrl: reader.result as string,
+      }));
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  // ==========================================
+  // MODAL TAMBAH MENU
+  // ==========================================
+
   const handleOpenCreate = () => {
     setEditingMenu(null);
 
@@ -99,36 +300,53 @@ export default function MenuManagement() {
       price: "",
       category: "MAKANAN",
       imageUrl: "",
-      isAvailable: true,
     });
 
     setError("");
     setIsOpen(true);
   };
 
+  // ==========================================
+  // MODAL EDIT MENU
+  // ==========================================
 
-  // EDIT
   const handleOpenEdit = (item: MenuItem) => {
     setEditingMenu(item);
 
     setFormData({
       name: item.name,
       description: item.description || "",
-      price: item.price.toString(),
+      price: String(item.price),
       category: item.category,
       imageUrl: item.imageUrl || "",
-      isAvailable: item.isAvailable,
     });
 
     setError("");
     setIsOpen(true);
   };
 
-  // =========================
-  // SUBMIT
-  // =========================
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // ==========================================
+  // SIMPAN MENU
+  // ==========================================
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (!formData.name.trim()) {
+      setError("Nama menu wajib diisi.");
+      showToast("Nama menu wajib diisi", "error");
+      return;
+    }
+
+    if (
+      formData.price.trim() === "" ||
+      !Number.isFinite(Number(formData.price)) ||
+      Number(formData.price) < 0
+    ) {
+      setError("Harga menu tidak valid.");
+      showToast("Harga menu tidak valid", "error");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -137,153 +355,421 @@ export default function MenuManagement() {
       const token = localStorage.getItem("token");
 
       const url = editingMenu
-        ? `http://localhost:3000/api/menu/${editingMenu.id}`
-        : "http://localhost:3000/api/menu";
+        ? `${API_URL}/api/menu/${editingMenu.id}`
+        : `${API_URL}/api/menu`;
 
       const method = editingMenu ? "PUT" : "POST";
 
-      const res = await fetch(url, {
+      const response = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${token ?? ""}`,
         },
         body: JSON.stringify({
           ...formData,
-          price: parseFloat(formData.price),
+          name: formData.name.trim(),
+          price: Number(formData.price),
+          isAvailable: editingMenu ? editingMenu.isAvailable : true,
         }),
       });
 
-      const data = await res.json();
+      const result = await response.json();
 
-      if (!res.ok) {
-        throw new Error(data.message || "Gagal menyimpan menu");
+      if (!response.ok) {
+        throw new Error(result.message || "Gagal menyimpan menu");
       }
 
       setIsOpen(false);
-      fetchMenu();
-    } catch (err: any) {
-      setError(err.message);
+
+      // Ambil hasil terbaru. Event Socket.IO juga akan
+      // membuat frontend customer mengambil data terbaru.
+      await fetchMenu();
+
+      showToast(
+        editingMenu ? "Menu berhasil diperbarui" : "Menu berhasil ditambahkan",
+        "success",
+      );
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Terjadi kesalahan saat menyimpan menu";
+
+      setError(message);
+      showToast(message, "error");
     } finally {
       setLoading(false);
     }
   };
 
-  // DELETE
-  const handleDelete = async (id: string) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus menu ini?")) {
-      return;
-    }
+  // ==========================================
+  // UBAH KETERSEDIAAN MENU
+  // ==========================================
+
+  const handleToggleAvailability = async (item: MenuItem) => {
+    if (loadingStatusId) return;
+
+    const nextStatus = !item.isAvailable;
+
+    setLoadingStatusId(item.id);
+
+    // Update tampilan sementara.
+    setMenuList((previous) =>
+      previous.map((menu) =>
+        menu.id === item.id
+          ? {
+              ...menu,
+              isAvailable: nextStatus,
+            }
+          : menu,
+      ),
+    );
 
     try {
       const token = localStorage.getItem("token");
 
-      const res = await fetch(`http://localhost:3000/api/menu/${id}`, {
-        method: "DELETE",
+      const response = await fetch(`${API_URL}/api/menu/${item.id}`, {
+        method: "PUT",
         headers: {
-          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token ?? ""}`,
         },
+        body: JSON.stringify({
+          name: item.name,
+          description: item.description || "",
+          price: Number(item.price),
+          category: item.category,
+          imageUrl: item.imageUrl || "",
+          isAvailable: nextStatus,
+        }),
       });
 
-      if (res.ok) {
-        fetchMenu();
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Gagal mengubah status menu");
       }
-    } catch (err) {
-      console.error("Gagal menghapus menu", err);
+
+      // Ambil nilai server agar status dan stok konsisten.
+      await fetchMenu();
+
+      showToast(
+        nextStatus
+          ? `${item.name} sekarang tersedia`
+          : `${item.name} ditandai habis`,
+        "success",
+      );
+    } catch (err: unknown) {
+      console.error("Gagal mengubah status menu:", err);
+
+      // Batalkan perubahan lokal jika request gagal.
+      setMenuList((previous) =>
+        previous.map((menu) =>
+          menu.id === item.id
+            ? {
+                ...menu,
+                isAvailable: item.isAvailable,
+              }
+            : menu,
+        ),
+      );
+
+      showToast(
+        err instanceof Error ? err.message : "Gagal mengubah status menu",
+        "error",
+      );
+    } finally {
+      setLoadingStatusId(null);
     }
   };
 
-  // FILTER DATA
-  const filteredMenu = menuList.filter((item) => {
-    const matchSearch =
-      item.name.toLowerCase().includes(search.toLowerCase()) ||
-      item.description?.toLowerCase().includes(search.toLowerCase());
+  // ==========================================
+  // HAPUS MENU
+  // ==========================================
 
-    const matchCategory =
-      selectedCategory === "SEMUA" || item.category === selectedCategory;
+  const handleOpenDelete = (item: MenuItem) => {
+    setMenuToDelete(item);
+    setDeleteDialogOpen(true);
+  };
 
-    const matchStatus =
-      selectedStatus === "SEMUA" ||
-      (selectedStatus === "TERSEDIA" && item.isAvailable) ||
-      (selectedStatus === "HABIS" && !item.isAvailable);
+  const handleDelete = async () => {
+    if (!menuToDelete || deletingId) return;
 
-    return matchSearch && matchCategory && matchStatus;
-  });
+    const id = menuToDelete.id;
 
-  // CATEGORY
-  const categories = [
-    {
-      value: "SEMUA",
-      label: "Semua Menu",
-    },
-    {
-      value: "MAKANAN",
-      label: "🍽️ Makanan",
-    },
-    {
-      value: "MINUMAN",
-      label: "🥤 Minuman",
-    },
-    {
-      value: "SNACK",
-      label: "🍟 Snack",
-    },
-    {
-      value: "DESSERT",
-      label: "🍰 Dessert",
-    },
-    {
-      value: "PAKET",
-      label: "📦 Paket",
-    },
-  ];
+    setDeletingId(id);
 
-  // STATISTIC
+    try {
+      const token = localStorage.getItem("token");
+
+      const response = await fetch(`${API_URL}/api/menu/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token ?? ""}`,
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || "Gagal menghapus menu");
+      }
+
+      setDeleteDialogOpen(false);
+      setMenuToDelete(null);
+
+      await fetchMenu();
+
+      showToast(result.message || "Menu berhasil dihapus", "success");
+    } catch (err: unknown) {
+      console.error("Gagal menghapus menu:", err);
+
+      showToast(
+        err instanceof Error ? err.message : "Gagal menghapus menu",
+        "error",
+      );
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // ==========================================
+  // FILTER MENU
+  // ==========================================
+
+  const filteredMenu = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+
+    return menuList.filter((item) => {
+      const matchSearch =
+        !keyword ||
+        item.name.toLowerCase().includes(keyword) ||
+        item.description?.toLowerCase().includes(keyword);
+
+      const matchCategory =
+        selectedCategory === "SEMUA" || item.category === selectedCategory;
+
+      const matchStatus =
+        selectedStatus === "SEMUA" ||
+        (selectedStatus === "TERSEDIA" && item.isAvailable) ||
+        (selectedStatus === "HABIS" && !item.isAvailable);
+
+      return matchSearch && matchCategory && matchStatus;
+    });
+  }, [menuList, search, selectedCategory, selectedStatus]);
+
   const totalMenu = menuList.length;
 
   const totalAvailable = menuList.filter((item) => item.isAvailable).length;
 
   const totalSoldOut = menuList.filter((item) => !item.isAvailable).length;
 
+  const resetFilter = () => {
+    setSearch("");
+    setSelectedCategory("SEMUA");
+    setSelectedStatus("SEMUA");
+  };
+
+  const hasFilter =
+    Boolean(search) ||
+    selectedCategory !== "SEMUA" ||
+    selectedStatus !== "SEMUA";
+
+  const renderCategoryButton = (
+    value: CategoryValue,
+    label: string,
+    icon?: ReactNode,
+  ) => {
+    const active = selectedCategory === value;
+
+    return (
+      <button
+        key={value}
+        type="button"
+        onClick={() => setSelectedCategory(value)}
+        className={`
+          inline-flex items-center gap-2 whitespace-nowrap
+          px-3.5 py-2 rounded-xl text-[11px] font-bold
+          transition-all duration-200 border
+          ${
+            active
+              ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/20"
+              : "bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600"
+          }
+        `}
+      >
+        {icon}
+        {label}
+      </button>
+    );
+  };
+
+  const getToastIcon = () => {
+    if (toast.type === "success") {
+      return <FiCheckCircle size={17} />;
+    }
+
+    if (toast.type === "error") {
+      return <FiXCircle size={17} />;
+    }
+
+    if (toast.type === "warning") {
+      return <FiAlertTriangle size={17} />;
+    }
+
+    return <FiInfo size={17} />;
+  };
+
+  const getToastClass = () => {
+    if (toast.type === "success") {
+      return "bg-emerald-600 text-white";
+    }
+
+    if (toast.type === "error") {
+      return "bg-rose-600 text-white";
+    }
+
+    if (toast.type === "warning") {
+      return "bg-amber-500 text-white";
+    }
+
+    return "bg-blue-600 text-white";
+  };
+
   return (
-    <div className="min-h-full bg-slate-50 p-6 lg:p-8">
-      {/* ================= HEADER ================= */}
-      <div className="flex flex-col gap-6 mb-8">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
+    <div className="min-h-full bg-slate-50 p-4 lg:p-6">
+      {/* TOAST */}
+      {toast.show && (
+        <div className="fixed right-5 top-5 z-[100] max-w-[calc(100vw-2rem)] animate-in slide-in-from-right-5 fade-in duration-200 sm:max-w-sm">
+          <div
+            className={`flex items-center gap-3 rounded-xl px-4 py-3 shadow-xl ${getToastClass()}`}
+          >
+            <div className="shrink-0">{getToastIcon()}</div>
+
+            <p className="flex-1 text-xs font-bold leading-5">
+              {toast.message}
+            </p>
+
+            <button
+              type="button"
+              onClick={hideToast}
+              aria-label="Tutup notifikasi"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition hover:bg-white/10"
+            >
+              <FiX size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* DIALOG KONFIRMASI HAPUS */}
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!deletingId) {
+            setDeleteDialogOpen(open);
+
+            if (!open) {
+              setMenuToDelete(null);
+            }
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl bg-white sm:max-w-sm">
+          <div className="flex flex-col items-center py-2 text-center">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+              <FiAlertTriangle size={23} />
+            </div>
+
+            <DialogHeader className="w-full">
+              <DialogTitle className="text-center text-lg font-bold text-slate-900">
+                Hapus Menu?
+              </DialogTitle>
+            </DialogHeader>
+
+            <p className="mt-2 px-2 text-xs leading-5 text-slate-500">
+              Apakah Anda yakin ingin menghapus menu{" "}
+              <span className="font-bold text-slate-800">
+                "{menuToDelete?.name}"
+              </span>
+              ?
+              <br />
+              Menu yang pernah digunakan dalam transaksi akan dinonaktifkan agar
+              riwayat tetap aman.
+            </p>
+
+            <div className="mt-5 flex w-full gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={Boolean(deletingId)}
+                onClick={() => {
+                  setDeleteDialogOpen(false);
+                  setMenuToDelete(null);
+                }}
+                className="h-10 flex-1 rounded-xl border-slate-200 text-xs"
+              >
+                Batal
+              </Button>
+
+              <Button
+                type="button"
+                disabled={Boolean(deletingId)}
+                onClick={() => void handleDelete()}
+                className="h-10 flex-1 rounded-xl bg-rose-600 text-xs text-white hover:bg-rose-700"
+              >
+                {deletingId ? (
+                  <span className="flex items-center gap-2">
+                    <FiRefreshCw size={14} className="animate-spin" />
+                    Memproses...
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <FiTrash2 size={13} />
+                    Hapus Menu
+                  </span>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* HEADER */}
+      <div className="mb-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <div className="flex items-center gap-2 mb-2">
+            <div className="mb-1.5 flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-blue-600" />
 
-              <span className="text-xs font-bold uppercase tracking-[0.15em] text-blue-600">
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-600">
                 Restaurant Management
               </span>
             </div>
 
-            <h1 className="text-3xl lg:text-4xl font-extrabold text-blue-600 tracking-tight">
+            <h1 className="text-2xl font-black tracking-tight text-black lg:text-3xl">
               Kelola Menu
             </h1>
 
-            <p className="text-sm text-slate-900 mt-2">
+            <p className="mt-1.5 text-xs text-slate-500">
               Kelola daftar makanan, minuman, harga, dan ketersediaan menu
               restoran.
             </p>
           </div>
 
           <Dialog open={isOpen} onOpenChange={setIsOpen}>
-            <DialogTrigger
+            <button
+              type="button"
               onClick={handleOpenCreate}
-              className="inline-flex items-center justify-center gap-2
-              bg-blue-600 hover:bg-blue-700
-              text-white px-5 py-3 rounded-xl
-              text-sm font-bold shadow-lg shadow-blue-600/20
-              transition-all hover:-translate-y-0.5"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/20 transition-all hover:-translate-y-0.5 hover:bg-blue-700"
             >
-              <span className="text-lg">+</span>
+              <FiPlus size={16} strokeWidth={2.5} />
               Tambah Menu
-            </DialogTrigger>
+            </button>
 
-            {/* ================= MODAL ================= */}
-            <DialogContent className="sm:max-w-lg bg-white rounded-2xl">
+            {/* FORM TAMBAH / EDIT */}
+            <DialogContent className="max-h-[90vh] overflow-y-auto rounded-2xl bg-white sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle className="text-xl font-bold text-slate-900">
                   {editingMenu ? "Edit Menu" : "Tambah Menu Baru"}
@@ -291,13 +777,15 @@ export default function MenuManagement() {
               </DialogHeader>
 
               {error && (
-                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-600 text-xs rounded-xl">
+                <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-600">
                   {error}
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-5 pt-2">
-                {/* NAME */}
+              <form
+                onSubmit={(event) => void handleSubmit(event)}
+                className="space-y-4 pt-2"
+              >
                 <div>
                   <label className="text-xs font-bold text-slate-600">
                     Nama Menu
@@ -306,18 +794,17 @@ export default function MenuManagement() {
                   <Input
                     required
                     value={formData.name}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        name: e.target.value,
-                      })
+                    onChange={(event) =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        name: event.target.value,
+                      }))
                     }
                     placeholder="Contoh: Nasi Goreng Spesial"
-                    className="mt-1.5 h-11 rounded-xl"
+                    className="mt-1.5 h-10 rounded-xl"
                   />
                 </div>
 
-                {/* IMAGE */}
                 <div>
                   <label className="text-xs font-bold text-slate-600">
                     Foto Produk
@@ -327,44 +814,34 @@ export default function MenuManagement() {
                     type="file"
                     accept="image/*"
                     onChange={handleImageChange}
-                    className="w-full mt-1.5 text-xs text-slate-500
-                    file:mr-4 file:py-2.5 file:px-4
-                    file:rounded-lg file:border-0
-                    file:text-xs file:font-bold
-                    file:bg-blue-50 file:text-blue-700
-                    hover:file:bg-blue-100 cursor-pointer"
+                    className="mt-1.5 w-full cursor-pointer text-xs text-slate-500 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-xs file:font-bold file:text-blue-700 hover:file:bg-blue-100"
                   />
                 </div>
 
-                {/* PREVIEW */}
                 {formData.imageUrl && (
-                  <div className="relative h-44 rounded-xl overflow-hidden border border-slate-200">
+                  <div className="relative h-40 overflow-hidden rounded-xl border border-slate-200">
                     <img
                       src={formData.imageUrl}
-                      alt="Preview"
+                      alt="Preview menu"
                       className="h-full w-full object-cover"
                     />
 
                     <button
                       type="button"
                       onClick={() =>
-                        setFormData((prev) => ({
-                          ...prev,
+                        setFormData((previous) => ({
+                          ...previous,
                           imageUrl: "",
                         }))
                       }
-                      className="absolute top-3 right-3
-                      bg-rose-600 hover:bg-rose-700
-                      text-white text-xs font-bold
-                      px-3 py-2 rounded-lg shadow"
+                      className="absolute right-2.5 top-2.5 rounded-lg bg-rose-600 px-3 py-1.5 text-[11px] font-bold text-white shadow hover:bg-rose-700"
                     >
                       Hapus Foto
                     </button>
                   </div>
                 )}
 
-                {/* PRICE + CATEGORY */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="text-xs font-bold text-slate-600">
                       Harga
@@ -373,16 +850,17 @@ export default function MenuManagement() {
                     <Input
                       type="number"
                       required
+                      min={0}
                       step={1000}
                       value={formData.price}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          price: e.target.value,
-                        })
+                      onChange={(event) =>
+                        setFormData((previous) => ({
+                          ...previous,
+                          price: event.target.value,
+                        }))
                       }
                       placeholder="25000"
-                      className="mt-1.5 h-11 rounded-xl"
+                      className="mt-1.5 h-10 rounded-xl"
                     />
                   </div>
 
@@ -393,32 +871,23 @@ export default function MenuManagement() {
 
                     <select
                       value={formData.category}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          category: e.target.value,
-                        })
+                      onChange={(event) =>
+                        setFormData((previous) => ({
+                          ...previous,
+                          category: event.target.value,
+                        }))
                       }
-                      className="w-full mt-1.5 h-11 px-3
-                      border border-slate-200 rounded-xl
-                      text-sm bg-white
-                      focus:outline-none
-                      focus:ring-2 focus:ring-blue-500"
+                      className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="MAKANAN">Makanan</option>
-
                       <option value="MINUMAN">Minuman</option>
-
                       <option value="SNACK">Snack / Camilan</option>
-
                       <option value="DESSERT">Dessert</option>
-
                       <option value="PAKET">Paket Hemat</option>
                     </select>
                   </div>
                 </div>
 
-                {/* DESCRIPTION */}
                 <div>
                   <label className="text-xs font-bold text-slate-600">
                     Deskripsi
@@ -426,53 +895,23 @@ export default function MenuManagement() {
 
                   <Input
                     value={formData.description}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        description: e.target.value,
-                      })
+                    onChange={(event) =>
+                      setFormData((previous) => ({
+                        ...previous,
+                        description: event.target.value,
+                      }))
                     }
                     placeholder="Penjelasan singkat menu..."
-                    className="mt-1.5 h-11 rounded-xl"
+                    className="mt-1.5 h-10 rounded-xl"
                   />
                 </div>
 
-                {/* AVAILABLE */}
-                <label
-                  className="flex items-center gap-3 p-3
-                  border border-slate-200 rounded-xl
-                  cursor-pointer hover:bg-slate-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={formData.isAvailable}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        isAvailable: e.target.checked,
-                      })
-                    }
-                    className="h-4 w-4 rounded text-blue-600"
-                  />
-
-                  <div>
-                    <p className="text-sm font-bold text-slate-700">
-                      Menu tersedia
-                    </p>
-
-                    <p className="text-xs text-slate-400">
-                      Menu dapat dipesan oleh pelanggan
-                    </p>
-                  </div>
-                </label>
-
-                {/* BUTTON */}
-                <div className="flex justify-end gap-3 pt-3">
+                <div className="flex justify-end gap-2 pt-2">
                   <Button
                     type="button"
                     variant="outline"
                     onClick={() => setIsOpen(false)}
-                    className="rounded-xl"
+                    className="rounded-xl text-xs"
                   >
                     Batal
                   </Button>
@@ -480,7 +919,7 @@ export default function MenuManagement() {
                   <Button
                     type="submit"
                     disabled={loading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-5"
+                    className="rounded-xl bg-blue-600 px-5 text-xs text-white hover:bg-blue-700"
                   >
                     {loading
                       ? "Menyimpan..."
@@ -493,285 +932,321 @@ export default function MenuManagement() {
             </DialogContent>
           </Dialog>
         </div>
+      </div>
 
-        {/* ================= STATISTIC ================= */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-xs font-semibold text-slate-900 uppercase tracking-wider">
-              Total Menu
-            </p>
+      {/* STATISTIK */}
+      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                Total Menu
+              </p>
 
-            <p className="text-3xl font-extrabold text-slate-900 mt-2">
-              {totalMenu}
-            </p>
+              <p className="mt-1 text-2xl font-black text-slate-900">
+                {totalMenu}
+              </p>
 
-            <p className="text-xs text-slate-900 mt-1">Semua menu restoran</p>
+              <p className="mt-1 text-[10px] text-slate-400">
+                Semua menu restoran
+              </p>
+            </div>
+
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <FiGrid size={17} />
+            </div>
           </div>
+        </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-xs font-semibold text-slate-900 uppercase tracking-wider">
-              Tersedia
-            </p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                Tersedia
+              </p>
 
-            <p className="text-3xl font-extrabold text-emerald-600 mt-2">
-              {totalAvailable}
-            </p>
+              <p className="mt-1 text-2xl font-black text-emerald-600">
+                {totalAvailable}
+              </p>
 
-            <p className="text-xs text-slate-900 mt-1">Menu siap dipesan</p>
+              <p className="mt-1 text-[10px] text-slate-400">
+                Menu siap dipesan
+              </p>
+            </div>
+
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+              <FiCheckCircle size={17} />
+            </div>
           </div>
+        </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-            <p className="text-xs font-semibold text-slate-900 uppercase tracking-wider">
-              Habis
-            </p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                Habis
+              </p>
 
-            <p className="text-3xl font-extrabold text-rose-500 mt-2">
-              {totalSoldOut}
-            </p>
+              <p className="mt-1 text-2xl font-black text-rose-500">
+                {totalSoldOut}
+              </p>
 
-            <p className="text-xs text-slate-900 mt-1">Perlu restock</p>
+              <p className="mt-1 text-[10px] text-slate-400">Perlu restock</p>
+            </div>
+
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50 text-rose-500">
+              <FiXCircle size={17} />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ================= FILTER AREA ================= */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 mb-6 shadow-sm">
-        <div className="flex flex-col lg:flex-row gap-4">
-          {/* SEARCH */}
+      {/* FILTER */}
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-col gap-2.5 lg:flex-row">
           <div className="relative flex-1">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-              🔍
-            </span>
+            <FiSearch
+              size={16}
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+            />
 
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder="Cari nama menu..."
-              className="w-full h-11 pl-11 pr-4
-              rounded-xl border border-slate-200
-              bg-slate-50 text-sm
-              outline-none
-              focus:bg-white
-              focus:ring-2 focus:ring-blue-500
-              transition"
+              className="h-9 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-xs text-slate-700 outline-none transition focus:bg-white focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
-          {/* STATUS */}
           <select
             value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="h-11 px-4 rounded-xl
-            border border-slate-200
-            bg-slate-50 text-sm font-medium
-            outline-none focus:ring-2
-            focus:ring-blue-500"
+            onChange={(event) =>
+              setSelectedStatus(event.target.value as StatusValue)
+            }
+            className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-medium text-slate-600 outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="SEMUA">Semua Status</option>
-
             <option value="TERSEDIA">Tersedia</option>
-
             <option value="HABIS">Habis</option>
           </select>
         </div>
 
-        {/* CATEGORY FILTER */}
-        <div className="flex items-center gap-2 overflow-x-auto pt-4 pb-1">
-          {categories.map((category) => {
-            const active = selectedCategory === category.value;
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-2.5">
+          {renderCategoryButton("SEMUA", "Semua Menu", <FiGrid size={13} />)}
 
-            return (
-              <button
-                key={category.value}
-                onClick={() => setSelectedCategory(category.value)}
-                className={`
-                  whitespace-nowrap px-4 py-2.5
-                  rounded-xl text-xs font-bold
-                  transition-all
-                  ${
-                    active
-                      ? "bg-blue-600 text-white shadow-md shadow-blue-600/20"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }
-                `}
-              >
-                {category.label}
-              </button>
-            );
-          })}
+          {renderCategoryButton(
+            "MAKANAN",
+            "Makanan",
+            categoryConfig.MAKANAN.icon,
+          )}
+
+          {renderCategoryButton(
+            "MINUMAN",
+            "Minuman",
+            categoryConfig.MINUMAN.icon,
+          )}
+
+          {renderCategoryButton("SNACK", "Snack", categoryConfig.SNACK.icon)}
+
+          {renderCategoryButton(
+            "DESSERT",
+            "Dessert",
+            categoryConfig.DESSERT.icon,
+          )}
+
+          {renderCategoryButton("PAKET", "Paket", categoryConfig.PAKET.icon)}
         </div>
       </div>
 
-      {/* ================= RESULT INFO ================= */}
-      <div className="flex items-center justify-between mb-4">
+      {/* DAFTAR MENU */}
+      <div className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">Daftar Menu</h2>
+          <h2 className="text-base font-extrabold text-slate-900">
+            Daftar Menu
+          </h2>
 
-          <p className="text-xs text-slate-900 mt-1">
-            Menampilkan {filteredMenu.length} dari {menuList.length} menu
+          <p className="mt-0.5 text-[10px] text-slate-400">
+            Menampilkan{" "}
+            <span className="font-bold text-slate-600">
+              {filteredMenu.length}
+            </span>{" "}
+            dari{" "}
+            <span className="font-bold text-slate-600">{menuList.length}</span>{" "}
+            menu
           </p>
         </div>
 
-        {(search ||
-          selectedCategory !== "SEMUA" ||
-          selectedStatus !== "SEMUA") && (
+        {hasFilter && (
           <button
-            onClick={() => {
-              setSearch("");
-              setSelectedCategory("SEMUA");
-              setSelectedStatus("SEMUA");
-            }}
-            className="text-xs font-bold text-blue-600 hover:text-blue-700 border rounded-2xl p-2"
+            type="button"
+            onClick={resetFilter}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-blue-600 transition hover:border-blue-200 hover:bg-blue-100"
           >
+            <FiRefreshCw size={12} />
             Reset Filter
           </button>
         )}
       </div>
 
-      {/* ================= MENU GRID ================= */}
       {filteredMenu.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-          {filteredMenu.map((item) => (
-            <div
-              key={item.id}
-              className="group bg-white
-              border border-slate-200
-              rounded-2xl overflow-hidden
-              shadow-sm hover:shadow-xl
-              hover:-translate-y-1
-              transition-all duration-300"
-            >
-              {/* IMAGE */}
-              <div className="relative h-52 overflow-hidden bg-slate-100">
-                <img
-                  src={
-                    item.imageUrl ||
-                    "https://placehold.co/600x400?text=No+Image"
+        <div className="grid grid-cols-2 gap-2.5 pb-8 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+          {filteredMenu.map((item) => {
+            const isUpdating = loadingStatusId === item.id;
+
+            return (
+              <div
+                key={item.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleOpenEdit(item)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleOpenEdit(item);
                   }
-                  alt={item.name}
-                  className="w-full h-full object-cover
-                  group-hover:scale-105
-                  transition-transform duration-500"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src =
-                      "https://placehold.co/600x400?text=No+Image";
-                  }}
-                />
-
-                {/* DARK OVERLAY */}
-                <div className="absolute inset-0 bg-linear-to-t from-black/40 via-transparent to-transparent" />
-
-                {/* STATUS */}
-                <span
-                  className={`
-                    absolute top-3 right-3
-                    px-3 py-1.5 rounded-full
-                    text-[10px] font-bold
-                    backdrop-blur-md
-                    ${
-                      item.isAvailable
-                        ? "bg-emerald-500/90 text-white"
-                        : "bg-rose-500/90 text-white"
+                }}
+                className="group cursor-pointer overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              >
+                <div className="relative h-24 overflow-hidden bg-slate-100">
+                  <img
+                    src={
+                      item.imageUrl ||
+                      "https://placehold.co/600x400?text=No+Image"
                     }
-                  `}
-                >
-                  {item.isAvailable ? "✓ Tersedia" : "✕ Habis"}
-                </span>
+                    alt={item.name}
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    onError={(event) => {
+                      const image = event.currentTarget;
+                      image.onerror = null;
+                      image.src = "https://placehold.co/600x400?text=No+Image";
+                    }}
+                  />
 
-                {/* CATEGORY */}
-                <span
-                  className="absolute bottom-3 left-3
-                  px-3 py-1.5 rounded-lg
-                  bg-white/90 backdrop-blur-md
-                  text-[10px] font-extrabold
-                  text-slate-700 uppercase"
-                >
-                  {item.category}
-                </span>
-              </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent" />
 
-              {/* CONTENT */}
-              <div className="p-5">
-                <h3 className="font-extrabold text-lg text-slate-900 line-clamp-1">
-                  {item.name}
-                </h3>
+                  <div className="absolute right-2.5 top-2.5">
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[7px] font-bold shadow-sm backdrop-blur-md ${
+                        item.isAvailable
+                          ? "bg-emerald-500/95 text-white"
+                          : "bg-rose-500/95 text-white"
+                      }`}
+                    >
+                      {item.isAvailable ? (
+                        <FiCheckCircle size={11} />
+                      ) : (
+                        <FiXCircle size={11} />
+                      )}
 
-                <p className="text-xs text-slate-800 mt-1.5 line-clamp-2 min-h-8">
-                  {item.description || "Tidak ada deskripsi menu."}
-                </p>
+                      {item.isAvailable ? "Tersedia" : "Habis"}
+                    </span>
+                  </div>
 
-                <div className="flex items-end justify-between mt-5">
-                  <div>
-                    <p className="text-[10px] font-semibold text-slate-800 uppercase">
-                      Harga
-                    </p>
-
-                    <p className="text-xl font-extrabold text-blue-600 mt-0.5">
-                      Rp {item.price.toLocaleString("id-ID")}
-                    </p>
+                  <div className="absolute bottom-2 left-2">
+                    <span className="inline-flex rounded-md bg-white/90 px-1.5 py-0.5 text-[7px] font-extrabold uppercase tracking-wide text-slate-700 backdrop-blur-md">
+                      {item.category}
+                    </span>
                   </div>
                 </div>
-              </div>
 
-              {/* ACTION */}
-              <div className="px-5 pb-5 flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleOpenEdit(item)}
-                  className="flex-1 rounded-xl
-                  border-blue-200
-                  text-blue-600
-                  hover:bg-blue-50
-                  hover:text-blue-700
-                  font-bold"
-                >
-                  Edit
-                </Button>
+                <div className="p-3">
+                  <h3 className="line-clamp-1 text-[13px] font-extrabold text-slate-900">
+                    {item.name}
+                  </h3>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleDelete(item.id)}
-                  className="flex-1 rounded-xl
-                  border-rose-200
-                  text-rose-500
-                  hover:bg-rose-50
-                  hover:text-rose-600
-                  font-bold"
-                >
-                  Hapus
-                </Button>
+                  <p className="mt-0.5 line-clamp-2 min-h-7 text-[9px] leading-3.5 text-slate-400">
+                    {item.description || "Tidak ada deskripsi menu."}
+                  </p>
+
+                  <div className="mt-2.5 flex items-end justify-between gap-2">
+                    <div>
+                      <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">
+                        Harga
+                      </p>
+
+                      <p className="mt-0.5 text-sm font-black text-blue-600">
+                        {formatRupiah(item.price)}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`rounded-md px-1.5 py-0.5 text-[7px] font-bold ${
+                        item.isAvailable
+                          ? "bg-emerald-50 text-emerald-600"
+                          : "bg-rose-50 text-rose-500"
+                      }`}
+                    >
+                      {item.isAvailable ? "Siap dipesan" : "Tidak tersedia"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-1.5 px-2.5 pb-2.5">
+                  <button
+                    type="button"
+                    disabled={isUpdating}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleToggleAvailability(item);
+                    }}
+                    className={`inline-flex h-7 flex-1 cursor-pointer items-center justify-center gap-1 rounded-md border text-[9px] font-bold transition disabled:cursor-wait disabled:opacity-60 ${
+                      item.isAvailable
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        : "border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100"
+                    }`}
+                  >
+                    {isUpdating ? (
+                      <FiRefreshCw size={11} className="animate-spin" />
+                    ) : item.isAvailable ? (
+                      <FiCheckCircle size={11} />
+                    ) : (
+                      <FiXCircle size={11} />
+                    )}
+
+                    {isUpdating
+                      ? "Mengubah..."
+                      : item.isAvailable
+                        ? "Tersedia"
+                        : "Habis"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleOpenDelete(item);
+                    }}
+                    className="inline-flex h-7 flex-1 cursor-pointer items-center justify-center gap-1 rounded-md border border-rose-100 bg-rose-50/40 text-[9px] font-bold text-rose-500 transition hover:border-rose-200 hover:bg-rose-50"
+                  >
+                    <FiTrash2 size={11} />
+                    Hapus
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
-        /* ================= EMPTY STATE ================= */
-        <div className="bg-white border border-slate-200 rounded-2xl py-20 text-center">
-          <div className="mx-auto h-16 w-16 rounded-2xl bg-slate-100 flex items-center justify-center text-3xl">
-            🍽️
+        <div className="rounded-2xl border border-slate-200 bg-white py-14 text-center shadow-sm">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-500">
+            <FiShoppingBag size={22} />
           </div>
 
-          <h3 className="text-lg font-bold text-slate-800 mt-5">
+          <h3 className="mt-3 text-base font-bold text-slate-800">
             Menu tidak ditemukan
           </h3>
 
-          <p className="text-sm text-slate-400 mt-1">
-            Coba ubah pencarian atau filter kategori kamu.
+          <p className="mt-1 text-[10px] text-slate-400">
+            Coba ubah pencarian atau filter kategori.
           </p>
 
-          {(search ||
-            selectedCategory !== "SEMUA" ||
-            selectedStatus !== "SEMUA") && (
+          {hasFilter && (
             <button
-              onClick={() => {
-                setSearch("");
-                setSelectedCategory("SEMUA");
-                setSelectedStatus("SEMUA");
-              }}
-              className="mt-5 text-sm font-bold text-blue-600 hover:text-blue-700"
+              type="button"
+              onClick={resetFilter}
+              className="mt-3 inline-flex items-center gap-1.5 text-[10px] font-bold text-blue-600 hover:text-blue-700"
             >
+              <FiRefreshCw size={12} />
               Reset Filter
             </button>
           )}

@@ -23,7 +23,7 @@ export default function AddCustomerModal({
 
       const token = localStorage.getItem("token");
 
-      const response = await fetch("http://localhost:5000/api/customers", {
+      const response = await fetch("http://localhost:3000/api/customers", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -68,7 +68,7 @@ export default function CustomerDetailModal({
         const token = localStorage.getItem("token");
 
         const response = await fetch(
-          `http://localhost:5000/api/customers/${customer.id}/orders`,
+          `http://localhost:3000/api/customers/${customer.id}/orders`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -115,7 +115,7 @@ export default function CustomerDetailModal({
       const token = localStorage.getItem("token");
 
       const response = await fetch(
-        "http://localhost:5000/api/customers/membership",
+        "http://localhost:3000/api/customers/membership",
         {
           method: "POST",
           headers: {

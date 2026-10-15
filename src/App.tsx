@@ -8,6 +8,7 @@ import MenuManagement from "./pages/menuManagement";
 import Dashboard from "./pages/Dashboard";
 import Customers from "./pages/customers/Customers";
 import Reports from "./pages/Reports";
+import Tables from "./pages/Table"
 
 
 
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/dashboard/customers" element={<Customers />} />
           <Route path="/dashboard/orders" element={<Orders />} />
           <Route path="/dashboard/reports" element={<Reports />} />
+          <Route path="/dashboard/tables" element={<Tables />} />
         </Route>
       </Route>
 
